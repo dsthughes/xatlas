@@ -5,7 +5,7 @@
 #include <cassert>
 #include "htslib/faidx.h"
 #include "htslib/sam.h"
-#include "samtools/bam.h"
+/*#include "samtools/bam.h"*/
 #include <map>
 #include <sstream>
 #include <vector>
@@ -203,20 +203,20 @@ int breakblock2(mean_and_sdx* x, double v) {
                          "movsd\t24(%[rdi]), %%xmm1\n\t"
                          "cvtsi2sdq\t%%rax, %%xmm2\n\t"
                          "ucomisd\t%%xmm2, %%xmm1\n\t"
-                         "jb\t.LLLL1112\n\t"
+                         "jb\t.LLLL1112%=\n\t"
                          "movsd\t40(%[rdi]), %%xmm2\n\t"
                          "movl\t$1, %[ebx]\n\t"
                          "mulsd\t%%xmm1, %%xmm2\n\t"
                          "ucomisd\t%%xmm2, %[xmm0]\n\t"
-                         "ja\t.LLLL6\n\t"
-                         ".LLLL1112:\n\t"
+                         "ja\t.LLLL6%=\n\t"
+                         ".LLLL1112%=:\n\t"
                          "movl\t48(%[rdi]), %%eax\n\t"
                          "xorl\t%[ebx], %[ebx]\n\t"
                          "cvtsi2sdq\t%%rax, %%xmm2\n\t"
                          "addsd\t%%xmm1, %%xmm2\n\t"
                          "ucomisd\t%%xmm2, %[xmm0]\n\t"
                          "seta\t%%bl\n\t"
-                         ".LLLL6:\n\t"
+                         ".LLLL6%=:\n\t"
                          : [ebx] "=b"(r)
                          : [xmm0] "x"(v), [rdi] "D"(x)
                          : "%rax", "%xmm1", "%xmm2");
@@ -226,12 +226,12 @@ int breakblock3(mean_and_sdx* x, double v) {
     int r = 0;
     __asm__ __volatile__("xorl\t%k[eax], %k[eax]\n\t"
                          "cmpq\t$0, (%[rdi])\n\t"
-                         "je\t.LLL45\n\t"
+                         "je\t.LLL45%=\n\t"
                          "movl\t52(%[rdi]), %k[eax]\n\t"
                          "movsd\t24(%[rdi]), %%xmm1\n\t"
                          "cvtsi2sdq\t%q[eax], %%xmm2\n\t"
                          "ucomisd\t%%xmm2, %%xmm1\n\t"
-                         "jb\t.LLL46\n\t"
+                         "jb\t.LLL46%=\n\t"
                          "movsd\t40(%[rdi]), %%xmm3\n\t"
                          "movl\t$1, %k[eax]\n\t"
                          "movsd\t.LCCC2(%%rip), %%xmm4\n\t"
@@ -239,13 +239,13 @@ int breakblock3(mean_and_sdx* x, double v) {
                          "addsd\t%%xmm4, %%xmm2\n\t"
                          "mulsd\t%%xmm1, %%xmm2\n\t"
                          "ucomisd\t%%xmm2, %[xmm0]\n\t"
-                         "ja\t.LLL45\n\t"
+                         "ja\t.LLL45%=\n\t"
                          "movapd\t%%xmm4, %%xmm2\n\t"
                          "subsd\t%%xmm3, %%xmm2\n\t"
                          "mulsd\t%%xmm1, %%xmm2\n\t"
                          "ucomisd\t%[xmm0], %%xmm2\n\t"
-                         "ja\t.LLL45\n\t"
-                         ".LLL46:\n\t"
+                         "ja\t.LLL45%=\n\t"
+                         ".LLL46%=:\n\t"
                          "subsd\t%%xmm1, %[xmm0]\n\t"
                          "cvttsd2si\t%[xmm0], %k[eax]\n\t"
                          "cltd\n\t"
@@ -254,7 +254,7 @@ int breakblock3(mean_and_sdx* x, double v) {
                          "cmpl\t48(%[rdi]), %k[eax]\n\t"
                          "setnb\t%b[eax]\n\t"
                          "movzbl\t%b[eax], %k[eax]\n\t"
-                         ".LLL45:\n\t"
+                         ".LLL45%=:\n\t"
                          : [eax] "=q"(r)
                          : [xmm0] "x"(v), [rdi] "D"(x)
                          : "%rdx", "%xmm1", "%xmm2", "%xmm3", "%xmm4");
@@ -263,23 +263,23 @@ int breakblock3(mean_and_sdx* x, double v) {
 void add_val(mean_and_sdx* x, double v) {
     __asm__ __volatile__("movq\t(%[rdi]), %%rax\n\t"
                          "testq\t%%rax, %%rax\n\t"
-                         "je\t.LL11125\n\t"
+                         "je\t.LL11125%=\n\t"
                          "movsd\t24(%[rdi]), %%xmm1\n\t"
                          "ucomisd\t%[xmm0], %%xmm1\n\t"
-                         "ja\t.LL11126\n\t"
+                         "ja\t.LL11126%=\n\t"
                          "ucomisd\t32(%[rdi]), %[xmm0]\n\t"
-                         "jbe\t.LL1115\n\t"
+                         "jbe\t.LL1115%=\n\t"
                          "movsd\t%[xmm0], 32(%[rdi])\n\t"
-                         ".LL1115:\n\t"
+                         ".LL1115%=:\n\t"
                          "addq\t$1, %%rax\n\t"
                          "movsd\t8(%[rdi]), %%xmm3\n\t"
                          "movapd\t%[xmm0], %%xmm2\n\t"
                          "testq\t%%rax, %%rax\n\t"
                          "movq\t%%rax, (%[rdi])\n\t"
                          "subsd\t%%xmm3, %%xmm2\n\t"
-                         "js\t.LL1119\n\t"
+                         "js\t.LL1119%=\n\t"
                          "cvtsi2sdq\t%%rax, %%xmm1\n\t"
-                         ".LL11120:\n\t"
+                         ".LL11120%=:\n\t"
                          "movapd\t%%xmm2, %%xmm4\n\t"
                          "divsd\t%%xmm1, %%xmm4\n\t"
                          "movapd\t%%xmm4, %%xmm1\n\t"
@@ -289,29 +289,29 @@ void add_val(mean_and_sdx* x, double v) {
                          "mulsd\t%%xmm2, %[xmm0]\n\t"
                          "addsd\t16(%[rdi]), %[xmm0]\n\t"
                          "movsd\t%[xmm0], 16(%[rdi])\n\t"
-                         "jmp\t.LL111444\n\t"
+                         "jmp\t.LL111444%=\n\t"
                          ".p2align 4,,10\n\t"
                          ".p2align 3\n\t"
-                         ".LL11126:\n\t"
+                         ".LL11126%=:\n\t"
                          "movsd\t%[xmm0], 24(%[rdi])\n\t"
-                         "jmp\t.LL1115\n\t"
+                         "jmp\t.LL1115%=\n\t"
                          ".p2align 4,,10\n\t"
                          ".p2align 3\n\t"
-                         ".LL11125:\n\t"
+                         ".LL11125%=:\n\t"
                          "movsd\t%[xmm0], 24(%[rdi])\n\t"
                          "movsd\t%[xmm0], 32(%[rdi])\n\t"
-                         "jmp\t.LL1115\n\t"
+                         "jmp\t.LL1115%=\n\t"
                          ".p2align 4,,10\n\t"
                          ".p2align 3\n\t"
-                         ".LL1119:\n\t"
+                         ".LL1119%=:\n\t"
                          "movq\t%%rax, %%rdx\n\t"
                          "andl\t$1, %%eax\n\t"
                          "shrq\t%%rdx\n\t"
                          "orq\t%%rax, %%rdx\n\t"
                          "cvtsi2sdq\t%%rdx, %%xmm1\n\t"
                          "addsd\t%%xmm1, %%xmm1\n\t"
-                         "jmp\t.LL11120\n\t"
-                         ".LL111444:\n\t"
+                         "jmp\t.LL11120%=\n\t"
+                         ".LL111444%=:\n\t"
                          :
                          : [xmm0] "x"(v), [rdi] "S"(x)
                          : "%rax", "%rdx", "%xmm1", "%xmm2", "%xmm3", "%xmm4");
@@ -706,7 +706,7 @@ inline void cigar2asci(bam1_t*& b) {
     }
     std::cout << "\n";
 }
-inline BASE_t get_read_base(bam1_t*& b, READ_OFFSET_t n) { return bam_nt16_rev_table[bam_seqi(bam_get_seq(b), n)]; }
+inline BASE_t get_read_base(bam1_t*& b, READ_OFFSET_t n) { return seq_nt16_str[bam_seqi(bam_get_seq(b), n)]; }
 inline REF_POS_t get_read_ref_pos(bam1_t*& b) { return b->core.pos; }
 inline REF_ID_t get_read_ref_id(bam1_t*& b) { return b->core.tid; }
 inline S_SEQ_t get_read_seq_range(bam1_t*& b, READ_OFFSET_t n, LENGTH_t l) {
@@ -994,6 +994,7 @@ inline void output_gvcf(REF_POS_t rposit_first, REF_POS_t& last_call_gvcf, LIST 
         reset_blocker(&mas_dp_);
         timespec nsstart, nsend;
         clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &nsstart);
+        stringstream tmppb;
         for (REF_POS_t i = last_call_gvcf + 1, last_block = last_call_gvcf + 1; i < rposit_first; ++i) {
             if (opts::rate && lrate) {
                 if (i % 10000 == 0) {
@@ -1009,25 +1010,24 @@ inline void output_gvcf(REF_POS_t rposit_first, REF_POS_t& last_call_gvcf, LIST 
             bool breakit = false;
             const char* reason = 0;
             string extra = "";
-            if (getk_(&mas_dp_) >= 1 && getmax_(&mas_dp_) == 0 && dp_cov >= 1)
-                reason = "nocov2cov", breakit = true;
-            if (getmin_(&mas_dp_) >= 1 && dp_cov == 0)
-                reason = "cov2nocov", breakit = true;
-            if (breakblock3(&mas_q_, (double)coverages.get_p(i, i_quals_)))
-                reason = "QUAL", breakit = true;
-            if (breakblock3(&mas_vr_, (double)coverages.get_force_call(i_vr_, i)))
-                reason = "vr", breakit = true;
-            if (breakblock3(&mas_rr_, (double)coverages.get_coverage(i_rr_, i)))
-                reason = "rr", breakit = true;
-            if (breakblock3(&mas_dp_, (double)dp_cov))
-                reason = "dp", breakit = true;
-            if (i == rposit_first - 1)
-                reason = "blocked", breakit = true;
             if (i == segs[piece_i].second) {
                 reason = "endofregion", breakit = true;
                 last_call_gvcf = -1;
             }
-            stringstream tmppb;
+            else if (i == rposit_first - 1)
+                reason = "blocked", breakit = true;
+            else if (breakblock3(&mas_dp_, (double)dp_cov))
+                reason = "dp", breakit = true;
+            else if (breakblock3(&mas_rr_, (double)coverages.get_coverage(i_rr_, i)))
+                reason = "rr", breakit = true;
+            else if (breakblock3(&mas_vr_, (double)coverages.get_force_call(i_vr_, i)))
+                reason = "vr", breakit = true;
+            else if (breakblock3(&mas_q_, (double)coverages.get_p(i, i_quals_)))
+                reason = "QUAL", breakit = true;
+            else if (getmin_(&mas_dp_) >= 1 && dp_cov == 0)
+                reason = "cov2nocov", breakit = true;
+            else if (getk_(&mas_dp_) >= 1 && getmax_(&mas_dp_) == 0 && dp_cov >= 1)
+                reason = "nocov2cov", breakit = true;
             if (breakit) {
                 BASE_t refbase = sequences.get_ref_base(last_block);
                 tmppb << region << "\t" << last_block << "\t.\t" << refbase << "\t.\t.\t" << reason
@@ -1069,8 +1069,8 @@ inline void output_gvcf(REF_POS_t rposit_first, REF_POS_t& last_call_gvcf, LIST 
             add_val(&mas_vr_, (short)coverages.get_force_call(i_vr_, i));
             add_val(&mas_rr_, (short)coverages.get_coverage(i_rr_, i));
             add_val(&mas_dp_, dp_cov);
-            output += tmppb.str();
         }
+        output += tmppb.str();
     }
 }
 inline GENOTYPE indel_genotype(INDEL_EVENT*& p_indel, COV_COUNTER const& coverages) {
@@ -1227,6 +1227,8 @@ inline void snp_evaluate(std::string const& region, REF_ID_t, REF_POS_t pos_, NA
                     ++var_cov;
                 }
             }
+            coverages.set_force_call(COV_COUNTER::AS_VR, rposit->first, var_cov);
+            coverages.set_force_call(COV_COUNTER::AS_AR, rposit->first, alternative_reads);
             double pr_snp_j_prod_sum = 1 - pr_err_j_prod_sum;
             uint8_t bin = floor(pr_snp_j_prod_sum * 10);
             bin = bin < 10 ? bin : 9;
@@ -1244,8 +1246,6 @@ inline void snp_evaluate(std::string const& region, REF_ID_t, REF_POS_t pos_, NA
             string rediculous_s = rediculous1.str();
             rediculous2 << pr_S_j_SNP_c;
             rediculous_s = rediculous2.str();
-            coverages.set_force_call(COV_COUNTER::AS_VR, rposit->first, var_cov);
-            coverages.set_force_call(COV_COUNTER::AS_AR, rposit->first, alternative_reads);
             COVERAGE_t n_tmp = var_cov + refbase_cov;
 #ifdef STUFF
             stringstream ittmp;
@@ -1811,7 +1811,7 @@ void do_it(LIST& segs, char const* region, char const* bf, const char* refseq, Q
                             }
                             std::string name;
                             for (size_t i5 = aid_offset + leading_sclip; i5 < aid_offset + leading_sclip + c_len; ++i5)
-                                name += bam_nt16_rev_table[bam_seqi(bam_get_seq(b), i5)];
+                                name += seq_nt16_str[bam_seqi(bam_get_seq(b), i5)];
                             this_reads_indels.push_back(A_READS_INDEL(b->core.tid, aid_pos - 1, name, leading_sclip,
                                                                       tailing_sclip, aid_offset - 1, c_len));
                             aid_offset += c_len;
@@ -1925,7 +1925,7 @@ void do_it(LIST& segs, char const* region, char const* bf, const char* refseq, Q
                         as_span += c_op;
                         for (uint32_t i6 = 0; i6 < c_len; ++i6) {
                             char refbase = sequences.get_ref_base(as_tplace);
-                            char allele = bam_nt16_rev_table[bam_seqi(bam_get_seq(b), as_qplace - 1)];
+                            char allele = seq_nt16_str[bam_seqi(bam_get_seq(b), as_qplace - 1)];
                             char qbase = ::toupper(allele);
                             if (as_nt_sub == 0 || refbase == qbase)
                                 coverages.add_coverage(COV_COUNTER::AS_COV, as_tplace);
@@ -1937,20 +1937,20 @@ void do_it(LIST& segs, char const* region, char const* bf, const char* refseq, Q
                                 if (as_qplace == 1) {
                                     as_readenv += qbase;
                                     for (size_t i7 = as_qplace; i7 < as_qplace + 6; ++i7)
-                                        as_readenv += ::tolower(bam_nt16_rev_table[bam_seqi(bam_get_seq(b), i7)]);
+                                        as_readenv += ::tolower(seq_nt16_str[bam_seqi(bam_get_seq(b), i7)]);
                                 } else if (as_qplace < 7) {
                                     for (size_t i7 = 0; i7 < as_qplace - 1; ++i7)
-                                        as_readenv += ::tolower(bam_nt16_rev_table[bam_seqi(bam_get_seq(b), i7)]);
+                                        as_readenv += ::tolower(seq_nt16_str[bam_seqi(bam_get_seq(b), i7)]);
                                     as_readenv += qbase;
                                     for (size_t i7 = as_qplace; i7 < as_qplace + 6; ++i7)
-                                        as_readenv += ::tolower(bam_nt16_rev_table[bam_seqi(bam_get_seq(b), i7)]);
+                                        as_readenv += ::tolower(seq_nt16_str[bam_seqi(bam_get_seq(b), i7)]);
                                 } else {
                                     for (size_t i7 = as_qplace - 7; i7 < as_qplace - 1; ++i7)
-                                        as_readenv += ::tolower(bam_nt16_rev_table[bam_seqi(bam_get_seq(b), i7)]);
+                                        as_readenv += ::tolower(seq_nt16_str[bam_seqi(bam_get_seq(b), i7)]);
                                     as_readenv += qbase;
                                     for (size_t i7 = as_qplace;
                                          i7 < (b->core.l_qseq - as_qplace > 6 ? as_qplace + 6 : b->core.l_qseq); ++i7)
-                                        as_readenv += ::tolower(bam_nt16_rev_table[bam_seqi(bam_get_seq(b), i7)]);
+                                        as_readenv += ::tolower(seq_nt16_str[bam_seqi(bam_get_seq(b), i7)]);
                                 }
                                 if (!strand) {
                                     for (uint32_t i7 = 0; i7 < (as_readenv.length() >> 1); ++i7) {
