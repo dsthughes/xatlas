@@ -1,31 +1,25 @@
+#include <bitset>
+#include <cassert>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <execinfo.h>
 #include <iostream>
 #include <fstream>
-#include <cstdlib>
-#include <cstdio>
-#include <cassert>
 #include "htslib/faidx.h"
 #include "htslib/sam.h"
-/*#include "samtools/bam.h"*/
 #include <map>
-#include <sstream>
-#include <vector>
-#include <algorithm>
-#include <cmath>
-#include <bitset>
-#include <time.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <signal.h>
 #include <string>
-#include <cstring>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <execinfo.h>
 #include <sys/resource.h>
-#include <utility>
+#include <sstream>
+#include <time.h>
+#include <unistd.h>
+#include <vector>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -51,10 +45,6 @@
 #ifndef MAX_READ_NAME
 #define MAX_READ_NAME 100
 #endif
-__asm__(".align\t8\n"
-        ".LCCC2:\n\t"
-        ".long\t0\n\t"
-        ".long\t1072693248\n\t");
 typedef std::vector<std::pair<uint32_t, uint32_t> > LIST;
 typedef std::map<std::string, LIST> LISTOREGIONS;
 void tokenise(std::vector<std::string>& t, std::string const& l, char s) {
@@ -69,7 +59,7 @@ void tokenise(std::vector<std::string>& t, std::string const& l, char s) {
         lst = pos;
     }
 }
-static char const* VERSION = "v0.0.2-rc4";
+static char const* VERSION = "v0.0.2-rc5";
 static char const* MY_NAME = "xatlas";
 static char const* OPTIONS = "Required arguments:\n"
                              "\n\t--ref          fasta format reference"
@@ -152,10 +142,10 @@ bool run_in_fork = false;
 bool silly_scavenge = true;
 bool ignore_low_qual = true;
 COVERAGE_t const MIN_VAR_READS = 2;
-COVERAGE_t const MIN_TOTAL_DEPTH = 5;
+//COVERAGE_t const MIN_TOTAL_DEPTH = 5;
 bool const STRAND_DIR_FILTER = false;
-QUAL_t const MIN_MAP_QUAL = 0;
-BIG_QUAL_t const INDEL_QUAL_CUTOFF = 2;
+//QUAL_t const MIN_MAP_QUAL = 0;
+//BIG_QUAL_t const INDEL_QUAL_CUTOFF = 2;
 COVERAGE_t const MIN_DEPTH_COVERAGE = 5;
 double const MIN_VAR_RATIO = 0.06;
 double const SNP_MIN_PR = 0.109;
@@ -169,7 +159,7 @@ double const SNP_HET_MAX = 0.9;
 double const SNP_STRAND_RAIO_CUTOFF = 0.01;
 COVERAGE_t const SNP_STRAND_TEST_COV_CUTOFF = 16;
 COVERAGE_t const SNP_MIN_COV = 2;
-double const READ_LEVEL_Z_CUTOFF = -1.3;
+//double const READ_LEVEL_Z_CUTOFF = -1.3;
 unsigned block_abs_lim = 10;
 double block_rel_lim = 0.3;
 double block_rel_min = 1.0;
@@ -183,155 +173,68 @@ COVERAGE_t SLX_SNP_HIGH_MAP_QUAL_MAX_COVERAGE = 8000;
 namespace {
 typedef std::pair<double, double> mean_and_sd_vals;
 typedef struct mean_and_sdx {
-    unsigned long long k_;
-    double mean_;
-    double sd_;
-    double min_;
-    double max_;
-    double block_rel_lim;
-    unsigned block_abs_lim;
-    unsigned block_rel_min;
+    uint32_t k;
+    double rel;
+    double abs;
+    double min;
+    double max;
+    double low;
+    double high;
+    double range;
+    double sum;
+    double sum_sq;
 } mean_and_sdx;
-int breakblock2(mean_and_sdx* x, double v) {
-    if (x->k_ == 0)
-        return 0;
-    int r = 0;
-    __asm__ __volatile__("xorl\t%[ebx], %[ebx]\n\t"
-                         ".cfi_def_cfa_offset 16\n\t"
-                         ".cfi_offset 3, -16\n\t"
-                         "movl\t52(%[rdi]), %%eax\n\t"
-                         "movsd\t24(%[rdi]), %%xmm1\n\t"
-                         "cvtsi2sdq\t%%rax, %%xmm2\n\t"
-                         "ucomisd\t%%xmm2, %%xmm1\n\t"
-                         "jb\t.LLLL1112%=\n\t"
-                         "movsd\t40(%[rdi]), %%xmm2\n\t"
-                         "movl\t$1, %[ebx]\n\t"
-                         "mulsd\t%%xmm1, %%xmm2\n\t"
-                         "ucomisd\t%%xmm2, %[xmm0]\n\t"
-                         "ja\t.LLLL6%=\n\t"
-                         ".LLLL1112%=:\n\t"
-                         "movl\t48(%[rdi]), %%eax\n\t"
-                         "xorl\t%[ebx], %[ebx]\n\t"
-                         "cvtsi2sdq\t%%rax, %%xmm2\n\t"
-                         "addsd\t%%xmm1, %%xmm2\n\t"
-                         "ucomisd\t%%xmm2, %[xmm0]\n\t"
-                         "seta\t%%bl\n\t"
-                         ".LLLL6%=:\n\t"
-                         : [ebx] "=b"(r)
-                         : [xmm0] "x"(v), [rdi] "D"(x)
-                         : "%rax", "%xmm1", "%xmm2");
-    return r;
+void reset_blocker(mean_and_sdx *x) {
+    x->k = 0;
+    x->min = 0.0;
+    x->max = 0.0;
+    x->low = 0.0;
+    x->high = 0.0;
+    x->range = 0.0;
+    x->sum = 0.0;
+    x->sum_sq = 0.0;
 }
-int breakblock3(mean_and_sdx* x, double v) {
-    int r = 0;
-    __asm__ __volatile__("xorl\t%k[eax], %k[eax]\n\t"
-                         "cmpq\t$0, (%[rdi])\n\t"
-                         "je\t.LLL45%=\n\t"
-                         "movl\t52(%[rdi]), %k[eax]\n\t"
-                         "movsd\t24(%[rdi]), %%xmm1\n\t"
-                         "cvtsi2sdq\t%q[eax], %%xmm2\n\t"
-                         "ucomisd\t%%xmm2, %%xmm1\n\t"
-                         "jb\t.LLL46%=\n\t"
-                         "movsd\t40(%[rdi]), %%xmm3\n\t"
-                         "movl\t$1, %k[eax]\n\t"
-                         "movsd\t.LCCC2(%%rip), %%xmm4\n\t"
-                         "movapd\t%%xmm3, %%xmm2\n\t"
-                         "addsd\t%%xmm4, %%xmm2\n\t"
-                         "mulsd\t%%xmm1, %%xmm2\n\t"
-                         "ucomisd\t%%xmm2, %[xmm0]\n\t"
-                         "ja\t.LLL45%=\n\t"
-                         "movapd\t%%xmm4, %%xmm2\n\t"
-                         "subsd\t%%xmm3, %%xmm2\n\t"
-                         "mulsd\t%%xmm1, %%xmm2\n\t"
-                         "ucomisd\t%[xmm0], %%xmm2\n\t"
-                         "ja\t.LLL45%=\n\t"
-                         ".LLL46%=:\n\t"
-                         "subsd\t%%xmm1, %[xmm0]\n\t"
-                         "cvttsd2si\t%[xmm0], %k[eax]\n\t"
-                         "cltd\n\t"
-                         "xorl\t%%edx, %k[eax]\n\t"
-                         "subl\t%%edx, %k[eax]\n\t"
-                         "cmpl\t48(%[rdi]), %k[eax]\n\t"
-                         "setnb\t%b[eax]\n\t"
-                         "movzbl\t%b[eax], %k[eax]\n\t"
-                         ".LLL45%=:\n\t"
-                         : [eax] "=q"(r)
-                         : [xmm0] "x"(v), [rdi] "D"(x)
-                         : "%rdx", "%xmm1", "%xmm2", "%xmm3", "%xmm4");
-    return r;
+void add_val(mean_and_sdx *x, double v)
+{
+    if (x->k == 0) {
+        x->min = x->max = v;
+        x->range = v * x->rel;
+        if (x->range > x->abs) {
+            x->low = v - x->range;
+            x->high = v + x->range;
+        } else {
+            x->low = v - x->abs;
+            x->high = v + x->abs;
+        }
+    } else if (v < x->min) {
+        x->min = v;
+        x->range = v * x->rel;
+        if (x->range > x->abs) {
+            x->low = x->max - x->range;
+            x->high = v + x->range;
+        } else {
+            x->low = x->max - x->abs;
+            x->high = v + x->abs;
+        }
+    } else if (v > x->max) {
+        x->max = v;
+        x->low = v + x->min - x->high;
+    }
+    x->sum += v;
+    x->sum_sq += v * v;
+    ++x->k;
 }
-void add_val(mean_and_sdx* x, double v) {
-    __asm__ __volatile__("movq\t(%[rdi]), %%rax\n\t"
-                         "testq\t%%rax, %%rax\n\t"
-                         "je\t.LL11125%=\n\t"
-                         "movsd\t24(%[rdi]), %%xmm1\n\t"
-                         "ucomisd\t%[xmm0], %%xmm1\n\t"
-                         "ja\t.LL11126%=\n\t"
-                         "ucomisd\t32(%[rdi]), %[xmm0]\n\t"
-                         "jbe\t.LL1115%=\n\t"
-                         "movsd\t%[xmm0], 32(%[rdi])\n\t"
-                         ".LL1115%=:\n\t"
-                         "addq\t$1, %%rax\n\t"
-                         "movsd\t8(%[rdi]), %%xmm3\n\t"
-                         "movapd\t%[xmm0], %%xmm2\n\t"
-                         "testq\t%%rax, %%rax\n\t"
-                         "movq\t%%rax, (%[rdi])\n\t"
-                         "subsd\t%%xmm3, %%xmm2\n\t"
-                         "js\t.LL1119%=\n\t"
-                         "cvtsi2sdq\t%%rax, %%xmm1\n\t"
-                         ".LL11120%=:\n\t"
-                         "movapd\t%%xmm2, %%xmm4\n\t"
-                         "divsd\t%%xmm1, %%xmm4\n\t"
-                         "movapd\t%%xmm4, %%xmm1\n\t"
-                         "addsd\t%%xmm3, %%xmm1\n\t"
-                         "subsd\t%%xmm1, %[xmm0]\n\t"
-                         "movsd\t%%xmm1, 8(%[rdi])\n\t"
-                         "mulsd\t%%xmm2, %[xmm0]\n\t"
-                         "addsd\t16(%[rdi]), %[xmm0]\n\t"
-                         "movsd\t%[xmm0], 16(%[rdi])\n\t"
-                         "jmp\t.LL111444%=\n\t"
-                         ".p2align 4,,10\n\t"
-                         ".p2align 3\n\t"
-                         ".LL11126%=:\n\t"
-                         "movsd\t%[xmm0], 24(%[rdi])\n\t"
-                         "jmp\t.LL1115%=\n\t"
-                         ".p2align 4,,10\n\t"
-                         ".p2align 3\n\t"
-                         ".LL11125%=:\n\t"
-                         "movsd\t%[xmm0], 24(%[rdi])\n\t"
-                         "movsd\t%[xmm0], 32(%[rdi])\n\t"
-                         "jmp\t.LL1115%=\n\t"
-                         ".p2align 4,,10\n\t"
-                         ".p2align 3\n\t"
-                         ".LL1119%=:\n\t"
-                         "movq\t%%rax, %%rdx\n\t"
-                         "andl\t$1, %%eax\n\t"
-                         "shrq\t%%rdx\n\t"
-                         "orq\t%%rax, %%rdx\n\t"
-                         "cvtsi2sdq\t%%rdx, %%xmm1\n\t"
-                         "addsd\t%%xmm1, %%xmm1\n\t"
-                         "jmp\t.LL11120%=\n\t"
-                         ".LL111444%=:\n\t"
-                         :
-                         : [xmm0] "x"(v), [rdi] "S"(x)
-                         : "%rax", "%rdx", "%xmm1", "%xmm2", "%xmm3", "%xmm4");
-    return;
+bool breakblock(mean_and_sdx *x, double v)
+{
+    return (x->k > 0 && (v < x->low || v > x->high || (v < x->min && v + std::max(v * x->rel, x->abs) < x->max)));
 }
-#define getmin_(X) ((X)->min_)
-#define getmax_(X) ((X)->max_)
-#define getmean_(X) ((X)->mean_)
-#define getk_(X) ((X)->k_)
-inline void reset_blocker(mean_and_sdx* x) {
-    memset(x, 0, sizeof(mean_and_sdx));
-    x->block_rel_lim = opts::block_rel_lim;
-    x->block_abs_lim = opts::block_abs_lim;
-    x->block_rel_min = opts::block_rel_min;
+double get_mean(mean_and_sdx *x)
+{
+    return (x->k > 0) ? x->sum / x->k : 0.0;
 }
-inline double getsd_(mean_and_sdx* x) {
-    double t = x->sd_;
-    if (x->k_ >= 2)
-        t = pow(t / (x->k_ - 1), 0.5);
-    return t;
+double get_sdx(mean_and_sdx *x)
+{
+    return (x->k > 1) ? sqrt((x->sum_sq - x->sum * x->sum / x->k) / (x->k - 1.0)) : 0.0;
 }
 typedef std::map<std::string, double> KNOWN_INDELS;
 KNOWN_INDELS get_known(std::string& region) {
@@ -378,7 +281,7 @@ KNOWN_INDELS get_known(std::string& region) {
 }
 namespace cuidado {
 static uint32_t const MAGIC = 255 * 1024 * 1024;
-size_t const MAX_REF_NAME_LENGTH = 10;
+//size_t const MAX_REF_NAME_LENGTH = 10;
 inline void switch_it(char x, std::string& y, size_t z) {
     switch (x) {
     case 'a':
@@ -529,8 +432,9 @@ class STUFF {
         idx = sam_index_load(in, bf);
         assert(idx != 0);
         alignment = bam_init1();
+        iter = NULL;
     }
-    bam_hdr_t* get_header() const { return header; }
+    //bam_hdr_t* get_header() const { return header; }
     hts_itr_t* get_iter(char const* what) {
         iter = sam_itr_querys(idx, header, what);
         return iter;
@@ -546,13 +450,13 @@ class STUFF {
 class SCF_SEQ {
     faidx_t* fai_;
     char* scf_seq_;
-    char const* scf_name_;
-    char const* scf_file_;
+    //char const* scf_name_;
+    //char const* scf_file_;
     uint32_t scf_len_;
     char get_nt(REF_POS_t i) const { return scf_seq_[i - 1]; }
 
   public:
-    SCF_SEQ(char const* refseq, char const* region) : scf_name_(region), scf_file_(refseq) {
+    SCF_SEQ(char const* refseq, char const* region) /*: scf_name_(region), scf_file_(refseq)*/ {
         int l;
         fai_ = fai_load(refseq);
         if (fai_ == 0)
@@ -594,7 +498,7 @@ class COV_COUNTER {
     FCALLS* const fcalls_;
     QUALS* const quals_;
     std::bitset<cuidado::MAGIC>& seen_;
-    uint32_t len_;
+    //uint32_t len_;
 
   public:
     enum INDEX { AID_DEP = 0, AID_REF_DEPTH = 1, AS_COV = 2, AS_DEL = 3, DUMMY };
@@ -602,7 +506,7 @@ class COV_COUNTER {
     enum QUALS_INDEX { SNVP = 0, INDELP = 1 };
     COV_COUNTER(uint32_t l)
         : covs_(new COVS[l + 1]), fcalls_(new FCALLS[l + 1]), quals_(new QUALS[l + 1]),
-          seen_(*(new std::bitset<cuidado::MAGIC>)), len_(l) {
+          seen_(*(new std::bitset<cuidado::MAGIC>))/*, len_(l)*/ {
         memset(quals_, 0, (l + 1) * sizeof(QUALS));
         memset(covs_, 0, (l + 1) * sizeof(COVS));
         memset(fcalls_, 0, (l + 1) * sizeof(FCALLS));
@@ -610,12 +514,12 @@ class COV_COUNTER {
     void set_snp_p(REF_POS_t p, float q) const { quals_[p].quals_[SNVP] = q; }
     void set_indel_p(REF_POS_t p, float q) const { quals_[p].quals_[INDELP] = q; }
     float get_p(REF_POS_t p, QUALS_INDEX g) const { return quals_[p].quals_[g]; }
-    float get_snp_p(REF_POS_t p) const { return quals_[p].quals_[SNVP]; }
-    float get_indel_p(REF_POS_t p) const { return quals_[p].quals_[INDELP]; }
+    //float get_snp_p(REF_POS_t p) const { return quals_[p].quals_[SNVP]; }
+    //float get_indel_p(REF_POS_t p) const { return quals_[p].quals_[INDELP]; }
     ~COV_COUNTER() {
         delete[] covs_;
         delete[] fcalls_;
-        delete quals_, delete &seen_;
+        delete[] quals_, delete &seen_;
     }
     void add_coverage(INDEX i, uint32_t p) {
         if (covs_[p].depths_[i] < ill::SLX_INDEL_LOW_MAP_QUAL_MAX_COVERAGE)
@@ -647,6 +551,7 @@ class COV_COUNTER {
     uint16_t get_force_call(FORCE_INDEX i, uint32_t p) const { return fcalls_[p].depths_[i]; }
     bool has_force_call(uint32_t p) const { return fcalls_[p].all_; }
 };
+/*
 bool indel_sorter(std::pair<S_SEQ_t, std::string> const& a, std::pair<S_SEQ_t, std::string> const& b) {
     return (a.second < b.second);
 }
@@ -680,12 +585,13 @@ uint32_t longest_homopolymer_run(char const* refenv) {
 }
 inline int32_t cigar_op(uint32_t*& cit) { return (*cit & BAM_CIGAR_MASK); }
 inline int32_t cigar_len(uint32_t*& cit) { return ((*cit & ~(BAM_CIGAR_MASK)) >> BAM_CIGAR_SHIFT); }
+*/
 inline void cigar2asci(bam1_t*& b) {
     uint32_t* cit = bam_get_cigar(b);
     std::cout << "\ncigar2asci CIGAR= ";
     for (size_t i = 0; i < b->core.n_cigar; ++i, ++cit) {
-        int32_t c_op = cigar_op(cit);
-        REF_POS_t c_len = cigar_len(cit);
+        uint32_t c_op = bam_cigar_op(*cit);
+        REF_POS_t c_len = bam_cigar_oplen(*cit);
         switch (c_op) {
         case BAM_CMATCH:
             std::cout << c_len << "M";
@@ -707,14 +613,14 @@ inline void cigar2asci(bam1_t*& b) {
     std::cout << "\n";
 }
 inline BASE_t get_read_base(bam1_t*& b, READ_OFFSET_t n) { return seq_nt16_str[bam_seqi(bam_get_seq(b), n)]; }
-inline REF_POS_t get_read_ref_pos(bam1_t*& b) { return b->core.pos; }
-inline REF_ID_t get_read_ref_id(bam1_t*& b) { return b->core.tid; }
+/*
 inline S_SEQ_t get_read_seq_range(bam1_t*& b, READ_OFFSET_t n, LENGTH_t l) {
     std::string tmp;
     for (size_t i = n; i < n + l; ++i)
         tmp += get_read_base(b, i);
     return tmp;
 }
+*/
 int32_t const NEAR_END = 3;
 int const SREADENV = 6;
 int const READENV = (SREADENV * 2) + 2;
@@ -816,6 +722,7 @@ struct A_READS_INDEL : public VAR_CORE {
         return os.str();
     }
 };
+/*
 std::ostream& operator<<(std::ostream& os, const SNP_EVENT& snp) {
     os << "[\"" << snp.allele_base_ << "\", " << (short)snp.qual_ << ", " << snp.qplace_ << ", " << snp.dist3_ << ", "
        << snp.nqs_ << ", \"" << snp.read_readenv_ << "\", "
@@ -837,6 +744,7 @@ std::ostream& operator<<(std::ostream& os, const A_READS_INDEL& indel) {
     os << indel.silly_key();
     return os;
 }
+*/
 typedef std::vector<A_READS_INDEL> A_READS_INDEL_LIST;
 typedef std::map<const REF_POS_t, COVERAGE_t> REF_COV_t;
 typedef REF_COV_t DEPTH;
@@ -886,7 +794,7 @@ struct INDEL_EVENT : public VAR_CORE {
     bool simple_strand_test() { return (has_calling_read_in_pos_strand_ && has_calling_read_in_neg_strand_); }
     double near_read_end_ratio() { return ((double)near_read_end_count_ / read_count_); }
     COVERAGE_t total_depth(DEPTH const& depth) { return depth.find(var_start_)->second; }
-    double var_ratio(DEPTH const& depth) { return ((double)read_count_ / total_depth(depth)); }
+    //double var_ratio(DEPTH const& depth) { return ((double)read_count_ / total_depth(depth)); }
     double mean_avnqs() { return (double)round(((double)ave_nbq_ / read_count_) * 100.0) / 100.0; }
     double mean_mapq() { return (double)round(((double)map_qual_ / read_count_) * 100.0) / 100.0; }
     double mean_var_rate() { return (double)round(((double)var_rate_gap_and_mismatch_ / read_count_) * 100.0) / 100.0; }
@@ -988,14 +896,23 @@ inline void output_gvcf(REF_POS_t rposit_first, REF_POS_t& last_call_gvcf, LIST 
         mean_and_sdx mas_vr_;
         mean_and_sdx mas_rr_;
         mean_and_sdx mas_dp_;
+        mas_q_.abs = opts::block_abs_lim;
+        mas_q_.rel = opts::block_rel_lim;
         reset_blocker(&mas_q_);
+        mas_vr_.abs = opts::block_abs_lim;
+        mas_vr_.rel = opts::block_rel_lim;
         reset_blocker(&mas_vr_);
+        mas_rr_.abs = opts::block_abs_lim;
+        mas_rr_.rel = opts::block_rel_lim;
         reset_blocker(&mas_rr_);
+        mas_dp_.abs = opts::block_abs_lim;
+        mas_dp_.rel = opts::block_rel_lim;
         reset_blocker(&mas_dp_);
         timespec nsstart, nsend;
         clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &nsstart);
         stringstream tmppb;
-        for (REF_POS_t i = last_call_gvcf + 1, last_block = last_call_gvcf + 1; i < rposit_first; ++i) {
+        bool endofregion = false;
+        for (REF_POS_t i = last_call_gvcf + 1, last_block = last_call_gvcf + 1; i <= rposit_first && !endofregion; ++i) {
             if (opts::rate && lrate) {
                 if (i % 10000 == 0) {
                     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &nsend);
@@ -1009,29 +926,29 @@ inline void output_gvcf(REF_POS_t rposit_first, REF_POS_t& last_call_gvcf, LIST 
                                    : (REF_POS_t)coverages.get_coverage(i_dp_, i);
             bool breakit = false;
             const char* reason = 0;
-            string extra = "";
             if (i == segs[piece_i].second) {
+                endofregion = true;
                 reason = "endofregion", breakit = true;
                 last_call_gvcf = -1;
             }
-            else if (i == rposit_first - 1)
+            else if (i == rposit_first)
                 reason = "blocked", breakit = true;
-            else if (breakblock3(&mas_dp_, (double)dp_cov))
+            else if (breakblock(&mas_dp_, (double)dp_cov))
                 reason = "dp", breakit = true;
-            else if (breakblock3(&mas_rr_, (double)coverages.get_coverage(i_rr_, i)))
+            else if (breakblock(&mas_rr_, (double)coverages.get_coverage(i_rr_, i)))
                 reason = "rr", breakit = true;
-            else if (breakblock3(&mas_vr_, (double)coverages.get_force_call(i_vr_, i)))
+            else if (breakblock(&mas_vr_, (double)coverages.get_force_call(i_vr_, i)))
                 reason = "vr", breakit = true;
-            else if (breakblock3(&mas_q_, (double)coverages.get_p(i, i_quals_)))
+            else if (breakblock(&mas_q_, (double)coverages.get_p(i, i_quals_)))
                 reason = "QUAL", breakit = true;
-            else if (getmin_(&mas_dp_) >= 1 && dp_cov == 0)
+            else if (mas_dp_.min >= 1 && dp_cov == 0)
                 reason = "cov2nocov", breakit = true;
-            else if (getk_(&mas_dp_) >= 1 && getmax_(&mas_dp_) == 0 && dp_cov >= 1)
+            else if (mas_dp_.k >= 1 && mas_dp_.max == 0 && dp_cov >= 1)
                 reason = "nocov2cov", breakit = true;
             if (breakit) {
                 BASE_t refbase = sequences.get_ref_base(last_block);
                 tmppb << region << "\t" << last_block << "\t.\t" << refbase << "\t.\t.\t" << reason
-                      << "\tEND=" << (last_block == i || rposit_first - 1 == i ? i : i - 1) << ";BLOCKAVG_"
+                      << "\tEND=" << (endofregion || last_block == i ? i : i - 1) << ";BLOCKAVG_"
                       << opts::block_label;
                 if (last_block == i) {
                     tmppb << ";PX=" << coverages.get_p(i, i_quals_) << "," << coverages.get_p(i, i_quals_) << ","
@@ -1044,21 +961,15 @@ inline void output_gvcf(REF_POS_t rposit_first, REF_POS_t& last_call_gvcf, LIST 
                           << ",0"
                           << ";DPX=" << dp_cov << "," << dp_cov << "," << dp_cov << ",0";
                 } else {
-                    if (rposit_first - 1 == i) {
-                        add_val(&mas_q_, coverages.get_p(i, i_quals_));
-                        add_val(&mas_vr_, (short)coverages.get_force_call(i_vr_, i));
-                        add_val(&mas_rr_, (short)coverages.get_coverage(i_rr_, i));
-                        add_val(&mas_dp_, dp_cov);
-                    }
-                    tmppb << ";PX=" << getmin_(&mas_q_) << "," << getmax_(&mas_q_) << "," << getmean_(&mas_q_) << ","
-                          << getsd_(&mas_q_) << ";VRX=" << getmin_(&mas_vr_) << "," << getmax_(&mas_vr_) << ","
-                          << getmean_(&mas_vr_) << "," << getsd_(&mas_vr_) << ";RRX=" << getmin_(&mas_rr_) << ","
-                          << getmax_(&mas_rr_) << "," << getmean_(&mas_rr_) << "," << getsd_(&mas_rr_)
-                          << ";DPX=" << getmin_(&mas_dp_) << "," << getmax_(&mas_dp_) << "," << getmean_(&mas_dp_)
-                          << "," << getsd_(&mas_dp_);
+                    tmppb << ";PX=" << mas_q_.min << "," << mas_q_.max << "," << get_mean(&mas_q_) << ","
+                          << get_sdx(&mas_q_) << ";VRX=" << mas_vr_.min << "," << mas_vr_.max << ","
+                          << get_mean(&mas_vr_) << "," << get_sdx(&mas_vr_) << ";RRX=" << mas_rr_.min << ","
+                          << mas_rr_.max << "," << get_mean(&mas_rr_) << "," << get_sdx(&mas_rr_)
+                          << ";DPX=" << mas_dp_.min << "," << mas_dp_.max << "," << get_mean(&mas_dp_)
+                          << "," << get_sdx(&mas_dp_);
                 }
-                tmppb << "\tGT:VR:RR:DP:GQ\t0/0:" << getmin_(&mas_vr_) << ":" << getmin_(&mas_rr_) << ":"
-                      << getmin_(&mas_dp_) << ":.\n";
+                tmppb << "\tGT:VR:RR:DP:GQ\t0/0:" << mas_vr_.min << ":" << mas_rr_.min << ":"
+                      << mas_dp_.min << ":.\n";
                 last_block = i;
                 reset_blocker(&mas_q_);
                 reset_blocker(&mas_vr_);
@@ -1241,11 +1152,13 @@ inline void snp_evaluate(std::string const& region, REF_ID_t, REF_POS_t pos_, NA
                                     (double)(alternative_reads / total_coverage) >= opts::max_alt_frac)) {
             } else if (pr_SNP_S_j_c_j < opts::SNP_MIN_PR)
                 continue;
+            /*
             stringstream rediculous1, rediculous2;
             rediculous1 << pr_S_j_ERR_c;
             string rediculous_s = rediculous1.str();
             rediculous2 << pr_S_j_SNP_c;
             rediculous_s = rediculous2.str();
+            */
             COVERAGE_t n_tmp = var_cov + refbase_cov;
 #ifdef STUFF
             stringstream ittmp;
@@ -1301,7 +1214,7 @@ inline void snp_evaluate(std::string const& region, REF_ID_t, REF_POS_t pos_, NA
             r += refbase;
             a += high_base;
             if (!opts::capturebed ||
-                (opts::capturebed && (rposit->first >= segs[piece_i].first && rposit->first <= segs[piece_i].second))) {
+                (rposit->first >= segs[piece_i].first && rposit->first <= segs[piece_i].second)) {
                 std::string osnpvstr;
                 if (opts::gvcftest && last_call_snp != (REF_POS_t)-1) {
                     osnpv.precision(3);
@@ -1420,8 +1333,8 @@ inline void output_indel(std::string const& region, INDEL_EVENT*& p_indel, std::
         filter += "PASS";
     else if (filter[filter.length() - 1] == ';')
         filter = filter.substr(0, filter.length() - 1);
-    if (!opts::capturebed || (opts::capturebed && (p_indel->var_start_ >= segs[piece_i].first &&
-                                                   p_indel->var_start_ <= segs[piece_i].second))) {
+    if (!opts::capturebed || (p_indel->var_start_ >= segs[piece_i].first &&
+                              p_indel->var_start_ <= segs[piece_i].second)) {
         std::string oindelvstr;
         if (opts::gvcftest && last_call_indel != (REF_POS_t)-1) {
             oindelv.precision(3);
@@ -1674,54 +1587,7 @@ void do_it(LIST& segs, char const* region, char const* bf, const char* refseq, Q
                     continue;
                 else if (b->core.qual < min_map_qual)
                     continue;
-                uint8_t* s = bam_get_aux(b);
-                while (s < b->data + b->l_data) {
-                    uint8_t type, key[3];
-                    key[2] = '\0';
-                    key[0] = s[0];
-                    key[1] = s[1];
-                    s += 2;
-                    type = *s;
-                    ++s;
-                    if (memcmp(key, (void*)"NM", 2) == 0) {
-                        assert(type != 'C' || type != 'c');
-                        nm = *s;
-                    } else if (memcmp(key, (void*)"AS", 2) == 0)
-                        score_as = *s;
-                    else if (memcmp(key, (void*)"RG", 2) == 0)
-                        rg = (char*)s;
-                    switch (type) {
-                    case 'A':
-                    case 'C':
-                    case 'c':
-                        ++s;
-                        break;
-                    case 'S':
-                    case 's':
-                        s += 2;
-                        break;
-                    case 'I':
-                    case 'i':
-                    case 'f':
-                        s += 4;
-                        break;
-                    case 'd':
-                        s += 8;
-                        break;
-                    case 'Z':
-                    case 'H':
-                        while (*s)
-                            s++;
-                        ++s;
-                        break;
-                    case 'B':
-                        break;
-                    default:
-                        assert(0);
-                        break;
-                    }
-                }
-                if (nm == -1) {
+                if ((nm = bam_aux2i(bam_aux_get(b, "NM"))) == -1) {
                     ++missing_nm_tag;
                     continue;
                 }
@@ -1739,8 +1605,8 @@ void do_it(LIST& segs, char const* region, char const* bf, const char* refseq, Q
                 bool aid_prev_ins = false, aid_first_nt = true;
                 for (size_t i = 0; i < b->core.n_cigar; ++i, ++cit) {
                     ++cigars;
-                    int32_t c_op = cigar_op(cit);
-                    REF_POS_t c_len = cigar_len(cit);
+                    uint32_t c_op = bam_cigar_op(*cit);
+                    REF_POS_t c_len = bam_cigar_oplen(*cit);
                     if (b->core.qual >= min_map_qual2) {
                         switch (c_op) {
                         case BAM_CMATCH:
@@ -1837,8 +1703,8 @@ void do_it(LIST& segs, char const* region, char const* bf, const char* refseq, Q
                         LENGTH_t indel_length = 0;
                         for (; cigar_i < b->core.n_cigar; ++cigar_i, ++cit) {
                             ++cigars;
-                            int32_t c_op = cigar_op(cit);
-                            REF_POS_t c_len = cigar_len(cit);
+                            uint32_t c_op = bam_cigar_op(*cit);
+                            REF_POS_t c_len = bam_cigar_oplen(*cit);
                             if (cigar_i == b->core.n_cigar - 1 && c_op == BAM_CSOFT_CLIP)
                                 break;
                             if (c_op == BAM_CINS) {
@@ -1855,7 +1721,7 @@ void do_it(LIST& segs, char const* region, char const* bf, const char* refseq, Q
                                 ref_pos += c_len;
                             else if (c_op == BAM_CMATCH || c_op == BAM_CEQUAL || c_op == BAM_CDIFF) {
                                 for (READ_POS_t j = read_pos; j < read_pos + c_len; ++j) {
-                                    REF_POS_t const check = get_read_ref_pos(b) + ref_pos + 1;
+                                    REF_POS_t const check = b->core.pos + ref_pos + 1;
                                     if ((c_op != BAM_CEQUAL &&
                                          get_read_base(b, j + leading_sclip) != sequences.get_ref_base(check)) ||
                                         c_op == BAM_CDIFF) {
@@ -2291,7 +2157,7 @@ int main(int argc, char** argv) {
     LOGIT(ill::SLX_SNP_HIGH_MAP_QUAL_MAX_COVERAGE);
     LOGIT(ill::SLX_SNP_MIN_COVERAGE);
     for (int i = 1; i < argc; i += 2) {
-        if (strlen(*(argv + i)) <= sizeof(options) || memcmp(*(argv + i), options, sizeof(options) != 0))
+        if (strlen(*(argv + i)) <= sizeof(options) || memcmp(*(argv + i), options, sizeof(options)) == 0)
             std::cerr << "this isn't an option " << *(argv + i) << "\n", exit(1);
         if (strcmp(*(argv + i) + sizeof(options) - 1, "ref") == 0)
             a = *(argv + i + 1);
@@ -2357,8 +2223,8 @@ int main(int argc, char** argv) {
     LOGIT(opts::max_alt_frac);
     LOGIT(opts::block_abs_lim);
     LOGIT(opts::block_rel_lim);
-    snprintf(opts::block_label + strlen(opts::block_label), 25, "%dp%da", int(100 * opts::block_rel_lim),
-             opts::block_abs_lim);
+    snprintf(opts::block_label + strlen(opts::block_label), 25, "%dp%da", (int)(100 * opts::block_rel_lim),
+             (int)opts::block_abs_lim);
     LOGIT(opts::block_label);
     LOGIT(opts::SLX_SNP_HIGH_MAP_QUAL_MAX_COVERAGE);
     cout << "let's go\n";
@@ -2387,7 +2253,8 @@ int main(int argc, char** argv) {
         cerr << "haven't implemented lower mapping qual for snps\n", exit(1);
     if (!pfx)
         cerr << "give me an output prefix\n", exit(1);
-    cerr << "using prefix " << pfx << "\n";
+    else
+        cerr << "using prefix " << pfx << "\n";
     cerr << "using minimum snp map qual " << (short)mmqual << "\n";
     cerr << "using minimum indel map qual " << (short)mmqual2 << "\n";
     cerr << "running with " << threads << " threads\n";
@@ -2421,7 +2288,6 @@ int main(int argc, char** argv) {
             if (!bf)
                 cerr << "problem reading " << opts::capturebed << "\n";
             string tmp;
-            std::string cscf = "";
             while (getline(bf, tmp)) {
                 std::vector<std::string> tmpvs;
                 tokenise(tmpvs, tmp, '\t');
